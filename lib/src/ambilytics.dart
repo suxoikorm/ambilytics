@@ -1,10 +1,11 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-import 'package:http/http.dart' as http;
+
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
@@ -49,7 +50,7 @@ void resetInitialized() {
   _firebaseAnalytics = null;
 }
 
-// TODO: consider adding a flag to send platform as param with all events (that would be needed to show platfrom as dimension)
+// TODO: consider adding a flag to send platform as param with all events (that would be needed to show platform as dimension)
 // Challenge is tha it can be done for all custom events, not sure about standard (e.g. screen_view)
 
 /// Prepares analytics for usage. Doesn't throw errors, in debug mode throws assertions. If Ambilytics fails to initialize [isAmbilyticsInitialized] returns false.
@@ -123,8 +124,7 @@ Future<void> initAnalytics(
       }
     }
     if (measurementId != null && apiSecret != null) {
-      _ambilytics =
-          AmbilyticsSession(measurementId, apiSecret, ambiUserId, false);
+      _ambilytics = AmbilyticsSession(measurementId, apiSecret, ambiUserId, false);
     }
     if (_ambilytics != null || _firebaseAnalytics != null) {
       _initialized = true;
@@ -132,8 +132,7 @@ Future<void> initAnalytics(
         _sendAppLaunchEvent();
       }
     } else {
-      _initError =
-          'Neither Firebase Analytics nor Measurement Protocol have been initialized';
+      _initError = 'Neither Firebase Analytics nor Measurement Protocol have been initialized';
       assert(true, _initError);
     }
   } catch (e) {
@@ -151,7 +150,7 @@ void _sendAppLaunchEvent() {
 /// Sends a given [eventName] with given [params] using either [firebaseAnalytics]
 /// or Measurement Protocol [ambilytics]. It tries Firebase Analytics first (if it is initialized)
 /// then it goes to MP. It doesn't send events with both protocols, just one
-void sendEvent({required String name, Map<String, Object>? parameters}) {
+Future<void> sendEvent({required String name, Map<String, Object>? parameters}) async {
   if (!_initialized) return;
   if (_disabled) return;
 
@@ -159,9 +158,9 @@ void sendEvent({required String name, Map<String, Object>? parameters}) {
   assert(name.isNotEmpty && name.length <= 40,
       'Event name should be between 1 and 40 characters long');
   if (_firebaseAnalytics != null) {
-    _firebaseAnalytics!.logEvent(name: name, parameters: parameters);
+    await _firebaseAnalytics!.logEvent(name: name, parameters: parameters);
   } else if (_ambilytics != null) {
-    _ambilytics!.sendEvent(name, parameters);
+    await _ambilytics!.sendEvent(name, parameters);
   }
 }
 
@@ -200,18 +199,16 @@ class AmbilyticsObserver extends RouteObserver<ModalRoute<dynamic>> {
   final bool alwaySendScreenViewCust;
   void Function(PlatformException error)? onError;
 
-  void _sendScreenView(Route<dynamic> route) {
+  Future<void> _sendScreenView(Route<dynamic> route) async {
     assert(route.settings.name != null, 'Route name cannot be null');
     if (route.settings.name == null) return;
 
     final name = route.settings.name!;
     if (_ambilytics != null) {
-      _ambilytics!
-          .sendEvent(PredefinedEvents.screenViewCust, {'screen_name': name});
+      await _ambilytics!.sendEvent(PredefinedEvents.screenViewCust, {'screen_name': name});
     } else {
-      _firebaseAnalytics!.logEvent(
-          name: PredefinedEvents.screenViewCust,
-          parameters: {'screen_name': name});
+      await _firebaseAnalytics!
+          .logEvent(name: PredefinedEvents.screenViewCust, parameters: {'screen_name': name});
     }
   }
 
@@ -255,9 +252,7 @@ class AmbilyticsObserver extends RouteObserver<ModalRoute<dynamic>> {
       faObserver!.didPop(route, previousRoute);
       if (!alwaySendScreenViewCust) return;
     }
-    if (previousRoute != null &&
-        routeFilter(previousRoute) &&
-        routeFilter(route)) {
+    if (previousRoute != null && routeFilter(previousRoute) && routeFilter(route)) {
       _sendScreenView(previousRoute);
     }
   }
@@ -283,18 +278,15 @@ class AmbilyticsSession {
   /// Sends an event to the analytics service.
   /// [eventName] is the name of the event. Max length is 40 characters.
   /// [params] is a Map of additional parameters to attach to the event.
-  void sendEvent(String eventName, Map<String, Object?>? params) {
+  Future<void> sendEvent(String eventName, Map<String, Object?>? params) async {
     assert(!reservedGa4Events.contains(eventName));
     if (reservedGa4Events.contains(eventName)) return;
     assert(eventName.length <= 40);
-    assert(
-        eventName.isNotEmpty &&
-            RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*$').hasMatch(eventName),
+    assert(eventName.isNotEmpty && RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*$').hasMatch(eventName),
         'Event name should start with a letter and contain only letters, numbers, and underscores.');
 
     Map<String, Object?>? defParams = {
-      'engagement_time_msec':
-          DateTime.now().toUtc().difference(sessionStarted).inMilliseconds,
+      'engagement_time_msec': DateTime.now().toUtc().difference(sessionStarted).inMilliseconds,
       'session_id': sessionId,
     };
     if (params != null) {
@@ -313,10 +305,9 @@ class AmbilyticsSession {
       'Content-Type': 'application/json',
     };
 
-    headers['Accept-Language'] =
-        PlatformDispatcher.instance.locale.toLanguageTag();
+    headers['Accept-Language'] = PlatformDispatcher.instance.locale.toLanguageTag();
 
-    http.post(
+    await http.post(
       Uri.parse(
           'https://www.google-analytics.com/${useValidationServer ? 'debug/' : ''}mp/collect?measurement_id=$measurementId&api_secret=$apiSecret'),
       headers: headers,
