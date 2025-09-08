@@ -1,9 +1,8 @@
+import 'package:ambilytics/ambilytics.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-
-import 'package:ambilytics/ambilytics.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -37,7 +36,7 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     await initAnalytics(measurementId: 'someId', apiSecret: 'someSecret');
     expect(ambilytics, isNotNull);
-    expect(ambilytics!.userId.isEmpty, false);
+    expect(ambilytics!.userId, null);
     expect(ambilytics!.measurementId.isEmpty, false);
     expect(ambilytics!.apiSecret.isEmpty, false);
     expect(firebaseAnalytics, null);
@@ -47,8 +46,7 @@ void main() {
 
   test('Ambilytics falls back to GA4 MP params when initialized', () async {
     // Seems like Flutter test SDK always sets platform to Android
-    await initAnalytics(
-        measurementId: 'someId', apiSecret: 'someSecret', fallbackToMP: true);
+    await initAnalytics(measurementId: 'someId', apiSecret: 'someSecret', fallbackToMP: true);
     expect(ambilytics, isNotNull);
     expect(firebaseAnalytics, null);
     expect(isAmbilyticsInitialized, true);
@@ -58,6 +56,8 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     expect(isAmbilyticsInitialized, false);
     var mock = MockAmbilyticsSession();
+    // Ensure mocked sendEvent returns a Future to avoid null being awaited
+    when(() => mock.sendEvent(any(), any())).thenAnswer((_) async {});
     setMockAmbilytics(mock);
     // Hiding MP params to use mocked instance instead
     await initAnalytics(
@@ -65,8 +65,7 @@ void main() {
         fallbackToMP: true);
     expect(isAmbilyticsInitialized, true);
     expect(isAmbilyticsDisabled, false);
-    final captured =
-        verify(() => mock.sendEvent(captureAny(), captureAny())).captured;
+    final captured = verify(() => mock.sendEvent(captureAny(), captureAny())).captured;
     expect(captured[0], 'app_launch');
     expect((captured[1] as Map)['platform'], 'linux');
     debugDefaultTargetPlatformOverride = null;
@@ -75,6 +74,8 @@ void main() {
   test('Ambilytics sends custom_event', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     var mock = MockAmbilyticsSession();
+    // Ensure mocked sendEvent returns a Future to avoid null being awaited
+    when(() => mock.sendEvent(any(), any())).thenAnswer((_) async {});
     setMockAmbilytics(mock);
     // Hiding MP params to use mocked instance instead
     await initAnalytics(
@@ -83,8 +84,7 @@ void main() {
     expect(isAmbilyticsInitialized, true);
     clearInteractions(mock);
     sendEvent(name: 'custom_event', parameters: {'custom_param': 'val1'});
-    final captured =
-        verify(() => mock.sendEvent(captureAny(), captureAny())).captured;
+    final captured = verify(() => mock.sendEvent(captureAny(), captureAny())).captured;
     expect(captured[0], 'custom_event');
     expect((captured[1] as Map)['custom_param'], 'val1');
     debugDefaultTargetPlatformOverride = null;
@@ -93,6 +93,8 @@ void main() {
   test('Ambilytics can be disabled and sendsEvent() doesn\'t throw', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     var mock = MockAmbilyticsSession();
+    // Ensure mocked sendEvent returns a Future to avoid null being awaited
+    when(() => mock.sendEvent(any(), any())).thenAnswer((_) async {});
     setMockAmbilytics(mock);
     // Hiding MP params to use mocked instance instead
     await initAnalytics(disableAnalytics: true);
@@ -100,8 +102,7 @@ void main() {
     expect(isAmbilyticsDisabled, true);
     clearInteractions(mock);
     sendEvent(name: 'custom_event', parameters: {'custom_param': 'val1'});
-    final captured =
-        verifyNever(() => mock.sendEvent(captureAny(), captureAny())).captured;
+    final captured = verifyNever(() => mock.sendEvent(captureAny(), captureAny())).captured;
     expect(captured.length, 0);
     debugDefaultTargetPlatformOverride = null;
   });
@@ -114,9 +115,7 @@ void main() {
     const testUserId = 'testUserId';
 
     await initAnalytics(
-        measurementId: testMeasurementId,
-        apiSecret: testApiSecret,
-        userId: testUserId);
+        measurementId: testMeasurementId, apiSecret: testApiSecret, userId: testUserId);
 
     expect(ambilytics!.userId, testUserId);
 
@@ -126,6 +125,8 @@ void main() {
   test('Ambilytics can be disabled and re-enabled', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.windows;
     var mock = MockAmbilyticsSession();
+    // Ensure mocked sendEvent returns a Future to avoid null being awaited
+    when(() => mock.sendEvent(any(), any())).thenAnswer((_) async {});
     setMockAmbilytics(mock);
     // Hiding MP params to use mocked instance instead
     await initAnalytics();
@@ -135,24 +136,21 @@ void main() {
     clearInteractions(mock);
 
     sendEvent(name: 'custom_event', parameters: {'custom_param': 'val1'});
-    var captured =
-        verifyNever(() => mock.sendEvent(captureAny(), captureAny())).captured;
+    var captured = verifyNever(() => mock.sendEvent(captureAny(), captureAny())).captured;
     expect(captured.length, 0);
 
     isAmbilyticsDisabled = false;
     clearInteractions(mock);
 
     sendEvent(name: 'custom_event', parameters: {'custom_param': 'val1'});
-    captured =
-        verify(() => mock.sendEvent(captureAny(), captureAny())).captured;
+    captured = verify(() => mock.sendEvent(captureAny(), captureAny())).captured;
     expect(captured[0], 'custom_event');
     expect((captured[1] as Map)['custom_param'], 'val1');
 
     debugDefaultTargetPlatformOverride = null;
   });
 
-  test('Firebase analytics sends app_launch event with correct platform',
-      () async {
+  test('Firebase analytics sends app_launch event with correct platform', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     var mock = MockFirebaseAnalytics();
     when(() => mock.logEvent(
@@ -190,6 +188,44 @@ void main() {
     expect((captured[1] as Map)['custom_param'], 'val1');
   });
 
+  test('setUserId updates FirebaseAnalytics and currentUserId', () async {
+    var mock = MockFirebaseAnalytics();
+    // stub setUserId to return a Future
+    when(() => mock.setUserId(id: any(named: 'id'))).thenAnswer((_) async {});
+    setMockFirebase(mock);
+
+    await setUserId('firebaseUser');
+
+    expect(currentUserId, 'firebaseUser');
+    verify(() => mock.setUserId(id: 'firebaseUser')).called(1);
+  });
+
+  test('setUserId updates AmbilyticsSession.userId and currentUserId', () async {
+    // Use a real AmbilyticsSession to observe the userId field change
+    final session = AmbilyticsSession(measurementId: 'm', apiSecret: 's', clientId: 'client-1');
+    setMockAmbilytics(session);
+
+    await setUserId('mpUser');
+
+    expect(currentUserId, 'mpUser');
+    expect(ambilytics!.userId, 'mpUser');
+  });
+
+  test('setUserId updates both FirebaseAnalytics and AmbilyticsSession', () async {
+    var mock = MockFirebaseAnalytics();
+    when(() => mock.setUserId(id: any(named: 'id'))).thenAnswer((_) async {});
+    setMockFirebase(mock);
+
+    final session = AmbilyticsSession(measurementId: 'm2', apiSecret: 's2', clientId: 'client-2');
+    setMockAmbilytics(session);
+
+    await setUserId('bothUser');
+
+    expect(currentUserId, 'bothUser');
+    verify(() => mock.setUserId(id: 'bothUser')).called(1);
+    expect(ambilytics!.userId, 'bothUser');
+  });
+
   test('Firebase analytics sends custom_event', () async {
     var mock = MockFirebaseAnalytics();
     setMockFirebase(mock);
@@ -210,7 +246,6 @@ void main() {
   });
 }
 
-//TODO, better add separate widget tests when /example is ready and simulate navigation there
 class MockAmbilyticsObserver extends Mock implements AmbilyticsObserver {}
 
 class MockFirebaseAnalytics extends Mock implements FirebaseAnalytics {}

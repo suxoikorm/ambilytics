@@ -17,6 +17,9 @@ Object? _initError;
 bool _initialized = false;
 bool _disabled = true;
 
+// Store user ID separately for external management
+String? _currentUserId;
+
 /// GA4 Measurement Protocol backend
 AmbilyticsSession? get ambilytics => _ambilytics;
 
@@ -33,6 +36,9 @@ Object? get initError => _initError;
 bool get isAmbilyticsDisabled => _disabled;
 set isAmbilyticsDisabled(value) => _disabled = value;
 
+/// Get current user ID
+String? get currentUserId => _currentUserId;
+
 @visibleForTesting
 void setMockAmbilytics(AmbilyticsSession ambilyticsSession) {
   _ambilytics = ambilyticsSession;
@@ -48,6 +54,21 @@ void resetInitialized() {
   _initialized = false;
   _ambilytics = null;
   _firebaseAnalytics = null;
+  _currentUserId = null;
+}
+
+/// Sets or updates the user ID for analytics
+/// This will update both Firebase Analytics and Measurement Protocol if they are initialized
+Future<void> setUserId(String? userId) async {
+  _currentUserId = userId;
+
+  if (_firebaseAnalytics != null) {
+    await _firebaseAnalytics!.setUserId(id: userId);
+  }
+
+  if (_ambilytics != null) {
+    _ambilytics!.userId = userId;
+  }
 }
 
 // TODO: consider adding a flag to send platform as param with all events (that would be needed to show platform as dimension)
@@ -69,20 +90,26 @@ void resetInitialized() {
 ///
 /// [apiSecret] and [measurementId] must be set in order to enable GA4 Measurement protocol and have [_ambilytics] initialized.
 ///
-/// [userId] allows overriding user identifier. If not provided, default user ID will be used by Firebase Analytics OR
-/// or a GUID will be created and put to shared_preferences storage (for Windows and Linux).
-Future<void> initAnalytics(
-    {bool disableAnalytics = false,
-    bool fallbackToMP = false,
-    bool sendAppLaunch = true,
-    FirebaseOptions? firebaseOptions,
-    String? measurementId,
-    String? apiSecret,
-    String? userId}) async {
+/// [userId] allows setting initial user identifier. Can be updated later using [setUserId].
+Future<void> initAnalytics({
+  bool disableAnalytics = false,
+  bool fallbackToMP = false,
+  bool sendAppLaunch = true,
+  FirebaseOptions? firebaseOptions,
+  String? measurementId,
+  String? apiSecret,
+  String? userId,
+}) async {
   _disabled = disableAnalytics;
   if (_initialized) return;
+
   try {
     WidgetsFlutterBinding.ensureInitialized();
+
+    // Store the provided user ID
+    _currentUserId = userId;
+
+    // Initialize Firebase Analytics for supported platforms
     if (defaultTargetPlatform == TargetPlatform.android ||
         defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.macOS ||
@@ -90,9 +117,11 @@ Future<void> initAnalytics(
       try {
         await Firebase.initializeApp(options: firebaseOptions);
         _firebaseAnalytics = FirebaseAnalytics.instance;
-        if (userId != null) {
-          await _firebaseAnalytics!.setUserId(id: userId);
+
+        if (_currentUserId != null) {
+          await _firebaseAnalytics!.setUserId(id: _currentUserId);
         }
+
         _initialized = true;
 
         if (sendAppLaunch && !_disabled) {
@@ -111,21 +140,26 @@ Future<void> initAnalytics(
     }
 
     // Use measurement protocol
-
-    var ambiUserId = userId;
-    const userIdField = 'userId';
-
-    if (ambiUserId == null) {
-      SharedPreferences prefs = await SharedPreferences.getInstance();
-      ambiUserId = prefs.getString(userIdField);
-      if (ambiUserId == null) {
-        ambiUserId = const Uuid().v4();
-        await prefs.setString(userIdField, ambiUserId);
-      }
-    }
     if (measurementId != null && apiSecret != null) {
-      _ambilytics = AmbilyticsSession(measurementId, apiSecret, ambiUserId, false);
+      // Get or create client ID (unique per installation)
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      const clientIdField = 'ambilytics_client_id';
+
+      String? clientId = prefs.getString(clientIdField);
+      if (clientId == null) {
+        clientId = const Uuid().v4();
+        await prefs.setString(clientIdField, clientId);
+      }
+
+      _ambilytics = AmbilyticsSession(
+        measurementId: measurementId,
+        apiSecret: apiSecret,
+        clientId: clientId,
+        userId: _currentUserId,
+        useValidationServer: false,
+      );
     }
+
     if (_ambilytics != null || _firebaseAnalytics != null) {
       _initialized = true;
       if (sendAppLaunch && !_disabled) {
@@ -133,7 +167,7 @@ Future<void> initAnalytics(
       }
     } else {
       _initError = 'Neither Firebase Analytics nor Measurement Protocol have been initialized';
-      assert(true, _initError);
+      assert(false, _initError);
     }
   } catch (e) {
     _initialized = false;
@@ -154,9 +188,11 @@ Future<void> sendEvent({required String name, Map<String, Object>? parameters}) 
   if (!_initialized) return;
   if (_disabled) return;
 
-  assert(!reservedGa4Events.contains(name));
+  assert(!reservedGa4Events.contains(name),
+      'Event name "$name" is reserved by GA4 and cannot be used');
   assert(name.isNotEmpty && name.length <= 40,
       'Event name should be between 1 and 40 characters long');
+
   if (_firebaseAnalytics != null) {
     await _firebaseAnalytics!.logEvent(name: name, parameters: parameters);
   } else if (_ambilytics != null) {
@@ -178,18 +214,19 @@ String? defaultNameExtractor(RouteSettings settings) => settings.name;
 /// the app uses Measurement Protocol and sends custom 'screen_view_cust'
 /// event together with screen name.
 class AmbilyticsObserver extends RouteObserver<ModalRoute<dynamic>> {
-  AmbilyticsObserver(
-      {this.nameExtractor = defaultNameExtractor,
-      this.routeFilter = defaultRouteFilter,
-      this.alwaySendScreenViewCust = false,
-      Function(PlatformException error)? onError})
-      : assert(_initialized, 'Ambilytics must be initialized first') {
+  AmbilyticsObserver({
+    this.nameExtractor = defaultNameExtractor,
+    this.routeFilter = defaultRouteFilter,
+    this.alwaySendScreenViewCust = false,
+    Function(PlatformException error)? onError,
+  }) : assert(_initialized, 'Ambilytics must be initialized first') {
     if (_firebaseAnalytics != null) {
       faObserver = FirebaseAnalyticsObserver(
-          analytics: _firebaseAnalytics!,
-          nameExtractor: nameExtractor,
-          routeFilter: routeFilter,
-          onError: onError);
+        analytics: _firebaseAnalytics!,
+        nameExtractor: nameExtractor,
+        routeFilter: routeFilter,
+        onError: onError,
+      );
     }
   }
 
@@ -200,15 +237,17 @@ class AmbilyticsObserver extends RouteObserver<ModalRoute<dynamic>> {
   void Function(PlatformException error)? onError;
 
   Future<void> _sendScreenView(Route<dynamic> route) async {
-    assert(route.settings.name != null, 'Route name cannot be null');
-    if (route.settings.name == null) return;
+    final screenName = nameExtractor(route.settings);
+    if (screenName == null) {
+      debugPrint('Warning: Route has no name, skipping screen view event');
+      return;
+    }
 
-    final name = route.settings.name!;
     if (_ambilytics != null) {
-      await _ambilytics!.sendEvent(PredefinedEvents.screenViewCust, {'screen_name': name});
+      await _ambilytics!.sendEvent(PredefinedEvents.screenViewCust, {'screen_name': screenName});
     } else {
       await _firebaseAnalytics!
-          .logEvent(name: PredefinedEvents.screenViewCust, parameters: {'screen_name': name});
+          .logEvent(name: PredefinedEvents.screenViewCust, parameters: {'screen_name': screenName});
     }
   }
 
@@ -259,18 +298,24 @@ class AmbilyticsObserver extends RouteObserver<ModalRoute<dynamic>> {
 }
 
 class AmbilyticsSession {
-  AmbilyticsSession(this.measurementId, this.apiSecret, this.userId,
-      [this.useValidationServer = false]) {
-    _sessionId = sessionStarted.toIso8601String();
+  AmbilyticsSession({
+    required this.measurementId,
+    required this.apiSecret,
+    required this.clientId,
+    this.userId,
+    this.useValidationServer = false,
+  }) {
+    _sessionId = DateTime.now().toUtc().millisecondsSinceEpoch.toString();
   }
 
   final String measurementId;
   final String apiSecret;
-  final String userId;
+  final String clientId; // Unique per installation
+  String? userId; // Can be null and updated later
 
   final DateTime sessionStarted = DateTime.now().toUtc();
   String get sessionId => _sessionId;
-  String _sessionId = '';
+  late final String _sessionId;
 
   // https://developers.google.com/analytics/devguides/collection/protocol/ga4/validating-events?client_type=gtag
   final bool useValidationServer;
@@ -279,27 +324,35 @@ class AmbilyticsSession {
   /// [eventName] is the name of the event. Max length is 40 characters.
   /// [params] is a Map of additional parameters to attach to the event.
   Future<void> sendEvent(String eventName, Map<String, Object?>? params) async {
-    assert(!reservedGa4Events.contains(eventName));
+    assert(!reservedGa4Events.contains(eventName), 'Event name "$eventName" is reserved by GA4');
     if (reservedGa4Events.contains(eventName)) return;
-    assert(eventName.length <= 40);
+
+    assert(eventName.length <= 40, 'Event name exceeds 40 characters limit');
     assert(eventName.isNotEmpty && RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*$').hasMatch(eventName),
         'Event name should start with a letter and contain only letters, numbers, and underscores.');
 
-    Map<String, Object?>? defParams = {
+    Map<String, Object?> defParams = {
       'engagement_time_msec': DateTime.now().toUtc().difference(sessionStarted).inMilliseconds,
       'session_id': sessionId,
     };
+
     if (params != null) {
       defParams.addAll(params);
     }
 
-    var body = jsonEncode({
-      'client_id': defaultTargetPlatform.name,
-      'user_id': userId,
+    final Map<String, dynamic> bodyMap = {
+      'client_id': clientId, // Use unique client ID instead of platform name
       'events': [
         {'name': eventName, 'params': defParams}
       ]
-    });
+    };
+
+    // Add user_id only if it's set
+    if (userId != null) {
+      bodyMap['user_id'] = userId;
+    }
+
+    var body = jsonEncode(bodyMap);
 
     var headers = {
       'Content-Type': 'application/json',
@@ -307,12 +360,21 @@ class AmbilyticsSession {
 
     headers['Accept-Language'] = PlatformDispatcher.instance.locale.toLanguageTag();
 
-    await http.post(
-      Uri.parse(
-          'https://www.google-analytics.com/${useValidationServer ? 'debug/' : ''}mp/collect?measurement_id=$measurementId&api_secret=$apiSecret'),
-      headers: headers,
-      body: body,
-    );
+    try {
+      final response = await http.post(
+        Uri.parse(
+            'https://www.google-analytics.com/${useValidationServer ? 'debug/' : ''}mp/collect?measurement_id=$measurementId&api_secret=$apiSecret'),
+        headers: headers,
+        body: body,
+      );
+
+      if (useValidationServer && response.statusCode == 200) {
+        // Log validation response for debugging
+        debugPrint('GA4 Validation Response: ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('Error sending event to GA4: $e');
+    }
   }
 }
 
