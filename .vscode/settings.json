@@ -1,19 +1,14 @@
 {
-    "spellright.language": [
-        "en"
-    ],
-    "spellright.documentTypes": [
-        "markdown",
-        "latex",
-        "plaintext"
-    ],
-    "cSpell.words": [
-        "activeview",
-        "adunit",
-        "ambi",
-        "ambilytics",
-        "Cust",
-        "flutterfire",
-        "prefs"
-    ]
+  "spellright.language": ["en"],
+  "spellright.documentTypes": ["markdown", "latex", "plaintext"],
+  "cSpell.words": [
+    "activeview",
+    "adunit",
+    "ambi",
+    "ambilytics",
+    "Cust",
+    "flutterfire",
+    "mocktail",
+    "prefs"
+  ]
 }

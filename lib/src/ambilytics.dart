@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:firebase_analytics/firebase_analytics.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -86,8 +85,6 @@ Future<void> setUserId(String? userId) async {
 ///
 /// If [sendAppLaunch] is true, "app_launch" will be sent with "platform" param value corresponding runtime platform (i.e. Windows)
 ///
-/// [firebaseOptions] forwards options (e.g. generated via `flutterfire configure`) to `Firebase.initializeApp()`.
-///
 /// [apiSecret] and [measurementId] must be set in order to enable GA4 Measurement protocol and have [_ambilytics] initialized.
 ///
 /// [userId] allows setting initial user identifier. Can be updated later using [setUserId].
@@ -95,7 +92,6 @@ Future<void> initAnalytics({
   bool disableAnalytics = false,
   bool fallbackToMP = false,
   bool sendAppLaunch = true,
-  FirebaseOptions? firebaseOptions,
   String? measurementId,
   String? apiSecret,
   String? userId,
@@ -115,7 +111,6 @@ Future<void> initAnalytics({
         defaultTargetPlatform == TargetPlatform.macOS ||
         kIsWeb) {
       try {
-        await Firebase.initializeApp(options: firebaseOptions);
         _firebaseAnalytics = FirebaseAnalytics.instance;
 
         if (_currentUserId != null) {
