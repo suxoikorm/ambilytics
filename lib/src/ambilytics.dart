@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:ambilytics/src/device_platform.dart';
 import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -172,7 +173,10 @@ Future<void> initAnalytics({
 }
 
 void _sendAppLaunchEvent() {
-  final params = {'platform': kIsWeb ? 'web' : defaultTargetPlatform.name};
+  final params = {
+    'platform': kIsWeb ? 'web' : defaultTargetPlatform.name,
+    'device_platform': DevicePlatform.current,
+  };
   sendEvent(name: PredefinedEvents.appLaunch, parameters: params);
 }
 
