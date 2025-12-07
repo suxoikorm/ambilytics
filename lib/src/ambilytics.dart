@@ -71,6 +71,13 @@ Future<void> setUserId(String? userId) async {
   }
 }
 
+Future<String?> getFirebaseAppInstanceId() async {
+  if (_firebaseAnalytics != null) {
+    return await _firebaseAnalytics!.appInstanceId;
+  }
+  return null;
+}
+
 // TODO: consider adding a flag to send platform as param with all events (that would be needed to show platform as dimension)
 // Challenge is tha it can be done for all custom events, not sure about standard (e.g. screen_view)
 
