@@ -20,6 +20,9 @@ bool _disabled = true;
 // Store user ID separately for external management
 String? _currentUserId;
 
+const _clientIdField = 'ambilytics_client_id';
+const _userIdField = 'ambilytics_user_id';
+
 /// GA4 Measurement Protocol backend
 AmbilyticsSession? get ambilytics => _ambilytics;
 
@@ -68,6 +71,13 @@ Future<void> setUserId(String? userId) async {
 
   if (_ambilytics != null) {
     _ambilytics!.userId = userId;
+    // Persist user ID for MP (Firebase handles its own persistence)
+    final prefs = await SharedPreferences.getInstance();
+    if (userId != null) {
+      await prefs.setString(_userIdField, userId);
+    } else {
+      await prefs.remove(_userIdField);
+    }
   }
 }
 
@@ -143,15 +153,26 @@ Future<void> initAnalytics({
     }
 
     // Use measurement protocol
+    bool isNewInstallation = false;
     if (measurementId != null && apiSecret != null) {
       // Get or create client ID (unique per installation)
       SharedPreferences prefs = await SharedPreferences.getInstance();
-      const clientIdField = 'ambilytics_client_id';
 
-      String? clientId = prefs.getString(clientIdField);
+      String? clientId = prefs.getString(_clientIdField);
       if (clientId == null) {
+        isNewInstallation = true;
         clientId = const Uuid().v4();
-        await prefs.setString(clientIdField, clientId);
+        await prefs.setString(_clientIdField, clientId);
+      }
+
+      // Load persisted user ID or use explicitly provided one
+      if (userId != null) {
+        await prefs.setString(_userIdField, userId);
+      } else {
+        final persistedUserId = prefs.getString(_userIdField);
+        if (persistedUserId != null) {
+          _currentUserId = persistedUserId;
+        }
       }
 
       _ambilytics = AmbilyticsSession(
@@ -165,6 +186,10 @@ Future<void> initAnalytics({
 
     if (_ambilytics != null || _firebaseAnalytics != null) {
       _initialized = true;
+      // Send first_open for new MP installations so GA4 registers the user
+      if (isNewInstallation && _ambilytics != null && !_disabled) {
+        await _ambilytics!.sendEvent('first_open', null);
+      }
       if (sendAppLaunch && !_disabled) {
         _sendAppLaunchEvent();
       }
@@ -330,9 +355,6 @@ class AmbilyticsSession {
   /// [eventName] is the name of the event. Max length is 40 characters.
   /// [params] is a Map of additional parameters to attach to the event.
   Future<void> sendEvent(String eventName, Map<String, Object?>? params) async {
-    assert(!reservedGa4Events.contains(eventName), 'Event name "$eventName" is reserved by GA4');
-    if (reservedGa4Events.contains(eventName)) return;
-
     assert(eventName.length <= 40, 'Event name exceeds 40 characters limit');
     assert(eventName.isNotEmpty && RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*$').hasMatch(eventName),
         'Event name should start with a letter and contain only letters, numbers, and underscores.');

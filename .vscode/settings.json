@@ -1,6 +1,12 @@
 {
-  "spellright.language": ["en"],
-  "spellright.documentTypes": ["markdown", "latex", "plaintext"],
+  "spellright.language": [
+    "en"
+  ],
+  "spellright.documentTypes": [
+    "markdown",
+    "latex",
+    "plaintext"
+  ],
   "cSpell.words": [
     "activeview",
     "adunit",
@@ -10,5 +16,6 @@
     "flutterfire",
     "mocktail",
     "prefs"
-  ]
+  ],
+  "dart.flutterSdkPath": ".fvm/versions/3.35.6"
 }

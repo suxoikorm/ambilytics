@@ -6,7 +6,7 @@ import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  setUpAll(() {
+  setUp(() {
     SharedPreferences.setMockInitialValues({});
   });
 
@@ -243,6 +243,81 @@ void main() {
         callOptions: captureAny(named: 'callOptions'))).captured;
     expect(captured[0], 'custom_event');
     expect((captured[1] as Map)['custom_param'], 'val1');
+  });
+
+  test('setUserId persists user ID for MP and clears on logout', () async {
+    final session = AmbilyticsSession(
+        measurementId: 'm', apiSecret: 's', clientId: 'client-1');
+    setMockAmbilytics(session);
+
+    // Login as user_A
+    await setUserId('user_A');
+    var prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('ambilytics_user_id'), 'user_A');
+    expect(ambilytics!.userId, 'user_A');
+    expect(currentUserId, 'user_A');
+
+    // Switch to user_B
+    await setUserId('user_B');
+    prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('ambilytics_user_id'), 'user_B');
+    expect(ambilytics!.userId, 'user_B');
+    expect(currentUserId, 'user_B');
+
+    // Logout
+    await setUserId(null);
+    prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('ambilytics_user_id'), null);
+    expect(ambilytics!.userId, null);
+    expect(currentUserId, null);
+  });
+
+  test('initAnalytics loads persisted user ID for MP', () async {
+    SharedPreferences.setMockInitialValues(
+        {'ambilytics_user_id': 'persisted_user'});
+
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    await initAnalytics(measurementId: 'someId', apiSecret: 'someSecret');
+
+    expect(currentUserId, 'persisted_user');
+    expect(ambilytics!.userId, 'persisted_user');
+
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  test('initAnalytics explicit userId overrides persisted one', () async {
+    SharedPreferences.setMockInitialValues(
+        {'ambilytics_user_id': 'old_user'});
+
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    await initAnalytics(
+      measurementId: 'someId',
+      apiSecret: 'someSecret',
+      userId: 'new_user',
+    );
+
+    expect(currentUserId, 'new_user');
+    expect(ambilytics!.userId, 'new_user');
+
+    // Verify it's also persisted
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('ambilytics_user_id'), 'new_user');
+
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  test('initAnalytics does not load persisted userId when user logged out',
+      () async {
+    // Simulate: user was logged in, then called setUserId(null) which removed the key
+    SharedPreferences.setMockInitialValues({});
+
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    await initAnalytics(measurementId: 'someId', apiSecret: 'someSecret');
+
+    expect(currentUserId, null);
+    expect(ambilytics!.userId, null);
+
+    debugDefaultTargetPlatformOverride = null;
   });
 }
 
