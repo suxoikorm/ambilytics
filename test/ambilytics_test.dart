@@ -306,6 +306,76 @@ void main() {
     debugDefaultTargetPlatformOverride = null;
   });
 
+  test('setUserProperty updates FirebaseAnalytics', () async {
+    var mock = MockFirebaseAnalytics();
+    when(() => mock.setUserProperty(
+        name: any(named: 'name'),
+        value: any(named: 'value'))).thenAnswer((_) async {});
+    setMockFirebase(mock);
+
+    await setUserProperty(name: 'subscription_tier', value: 'premium');
+
+    verify(() => mock.setUserProperty(name: 'subscription_tier', value: 'premium')).called(1);
+  });
+
+  test('setUserProperty updates AmbilyticsSession and persists', () async {
+    final session = AmbilyticsSession(
+        measurementId: 'm', apiSecret: 's', clientId: 'client-1');
+    setMockAmbilytics(session);
+
+    await setUserProperty(name: 'plan', value: 'pro');
+
+    expect(ambilytics!.userProperties['plan'], 'pro');
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('ambilytics_user_prop_plan'), 'pro');
+  });
+
+  test('setUserProperty clears property when value is null', () async {
+    final session = AmbilyticsSession(
+        measurementId: 'm', apiSecret: 's', clientId: 'client-1');
+    setMockAmbilytics(session);
+
+    await setUserProperty(name: 'plan', value: 'pro');
+    expect(ambilytics!.userProperties['plan'], 'pro');
+
+    await setUserProperty(name: 'plan', value: null);
+    expect(ambilytics!.userProperties.containsKey('plan'), false);
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('ambilytics_user_prop_plan'), null);
+  });
+
+  test('setUserProperty updates both Firebase and MP', () async {
+    var mock = MockFirebaseAnalytics();
+    when(() => mock.setUserProperty(
+        name: any(named: 'name'),
+        value: any(named: 'value'))).thenAnswer((_) async {});
+    setMockFirebase(mock);
+
+    final session = AmbilyticsSession(
+        measurementId: 'm', apiSecret: 's', clientId: 'client-1');
+    setMockAmbilytics(session);
+
+    await setUserProperty(name: 'role', value: 'admin');
+
+    verify(() => mock.setUserProperty(name: 'role', value: 'admin')).called(1);
+    expect(ambilytics!.userProperties['role'], 'admin');
+  });
+
+  test('initAnalytics loads persisted user properties for MP', () async {
+    SharedPreferences.setMockInitialValues({
+      'ambilytics_user_prop_plan': 'enterprise',
+      'ambilytics_user_prop_theme': 'dark',
+    });
+
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    await initAnalytics(measurementId: 'someId', apiSecret: 'someSecret');
+
+    expect(ambilytics!.userProperties['plan'], 'enterprise');
+    expect(ambilytics!.userProperties['theme'], 'dark');
+
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   test('initAnalytics does not load persisted userId when user logged out',
       () async {
     // Simulate: user was logged in, then called setUserId(null) which removed the key

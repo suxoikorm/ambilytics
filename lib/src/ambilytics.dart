@@ -22,6 +22,7 @@ String? _currentUserId;
 
 const _clientIdField = 'ambilytics_client_id';
 const _userIdField = 'ambilytics_user_id';
+const _userPropertiesPrefix = 'ambilytics_user_prop_';
 
 /// GA4 Measurement Protocol backend
 AmbilyticsSession? get ambilytics => _ambilytics;
@@ -58,6 +59,37 @@ void resetInitialized() {
   _ambilytics = null;
   _firebaseAnalytics = null;
   _currentUserId = null;
+}
+
+/// Sets or updates a user property for analytics.
+/// For Firebase Analytics (Android, iOS, macOS, Web), calls setUserProperty directly.
+/// For Measurement Protocol (Windows, Linux), stores the property and includes it
+/// in the `user_properties` field of every subsequent event payload.
+///
+/// [name] must be 1-24 characters, start with a letter, and contain only
+/// letters, numbers, and underscores. Must not start with "firebase_", "google_", or "ga_".
+/// [value] is the property value (up to 36 characters). Pass `null` to clear the property.
+Future<void> setUserProperty({required String name, required String? value}) async {
+  assert(name.isNotEmpty && name.length <= 24,
+      'User property name should be between 1 and 24 characters long');
+  assert(RegExp(r'^[a-zA-Z][a-zA-Z0-9_]*$').hasMatch(name),
+      'User property name should start with a letter and contain only letters, numbers, and underscores.');
+  assert(!name.startsWith('firebase_') && !name.startsWith('google_') && !name.startsWith('ga_'),
+      'User property name must not start with "firebase_", "google_", or "ga_".');
+
+  if (_firebaseAnalytics != null) {
+    await _firebaseAnalytics!.setUserProperty(name: name, value: value);
+  }
+
+  if (_ambilytics != null) {
+    _ambilytics!.setUserProperty(name, value);
+    final prefs = await SharedPreferences.getInstance();
+    if (value != null) {
+      await prefs.setString('$_userPropertiesPrefix$name', value);
+    } else {
+      await prefs.remove('$_userPropertiesPrefix$name');
+    }
+  }
 }
 
 /// Sets or updates the user ID for analytics
@@ -182,6 +214,17 @@ Future<void> initAnalytics({
         userId: _currentUserId,
         useValidationServer: false,
       );
+
+      // Load persisted user properties
+      for (final key in prefs.getKeys()) {
+        if (key.startsWith(_userPropertiesPrefix)) {
+          final propName = key.substring(_userPropertiesPrefix.length);
+          final propValue = prefs.getString(key);
+          if (propValue != null) {
+            _ambilytics!.setUserProperty(propName, propValue);
+          }
+        }
+      }
     }
 
     if (_ambilytics != null || _firebaseAnalytics != null) {
@@ -343,6 +386,17 @@ class AmbilyticsSession {
   final String apiSecret;
   final String clientId; // Unique per installation
   String? userId; // Can be null and updated later
+  final Map<String, String> _userProperties = {};
+
+  Map<String, String> get userProperties => Map.unmodifiable(_userProperties);
+
+  void setUserProperty(String name, String? value) {
+    if (value != null) {
+      _userProperties[name] = value;
+    } else {
+      _userProperties.remove(name);
+    }
+  }
 
   final DateTime sessionStarted = DateTime.now().toUtc();
   String get sessionId => _sessionId;
@@ -378,6 +432,14 @@ class AmbilyticsSession {
     // Add user_id only if it's set
     if (userId != null) {
       bodyMap['user_id'] = userId;
+    }
+
+    // Add user properties if any are set
+    if (_userProperties.isNotEmpty) {
+      bodyMap['user_properties'] = {
+        for (final entry in _userProperties.entries)
+          entry.key: {'value': entry.value}
+      };
     }
 
     var body = jsonEncode(bodyMap);
