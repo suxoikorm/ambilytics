@@ -24,6 +24,14 @@ const _clientIdField = 'ambilytics_client_id';
 const _userIdField = 'ambilytics_user_id';
 const _userPropertiesPrefix = 'ambilytics_user_prop_';
 
+const Set<String> _reservedUserPropertyNames = {
+  'first_open_time',
+  'first_visit_time',
+  'last_deep_link_referrer',
+  'user_id',
+  'first_open_after_install',
+};
+
 /// GA4 Measurement Protocol backend
 AmbilyticsSession? get ambilytics => _ambilytics;
 
@@ -64,10 +72,11 @@ void resetInitialized() {
 /// Sets or updates a user property for analytics.
 /// For Firebase Analytics (Android, iOS, macOS, Web), calls setUserProperty directly.
 /// For Measurement Protocol (Windows, Linux), stores the property and includes it
-/// in the `user_properties` field of every subsequent event payload.
+/// in the `user_properties` field of the next event payload sent via Measurement Protocol.
 ///
 /// [name] must be 1-24 characters, start with a letter, and contain only
 /// letters, numbers, and underscores. Must not start with "firebase_", "google_", or "ga_".
+/// Must not be a reserved name (first_open_time, first_visit_time, etc.).
 /// [value] is the property value (up to 36 characters). Pass `null` to clear the property.
 Future<void> setUserProperty({required String name, required String? value}) async {
   assert(name.isNotEmpty && name.length <= 24,
@@ -76,6 +85,8 @@ Future<void> setUserProperty({required String name, required String? value}) asy
       'User property name should start with a letter and contain only letters, numbers, and underscores.');
   assert(!name.startsWith('firebase_') && !name.startsWith('google_') && !name.startsWith('ga_'),
       'User property name must not start with "firebase_", "google_", or "ga_".');
+  assert(!_reservedUserPropertyNames.contains(name),
+      'User property name "$name" is reserved by GA4 and cannot be used.');
 
   if (_firebaseAnalytics != null) {
     await _firebaseAnalytics!.setUserProperty(name: name, value: value);
@@ -387,14 +398,17 @@ class AmbilyticsSession {
   final String clientId; // Unique per installation
   String? userId; // Can be null and updated later
   final Map<String, String> _userProperties = {};
+  Map<String, String> _pendingUserProperties = {};
 
   Map<String, String> get userProperties => Map.unmodifiable(_userProperties);
 
   void setUserProperty(String name, String? value) {
     if (value != null) {
       _userProperties[name] = value;
+      _pendingUserProperties[name] = value;
     } else {
       _userProperties.remove(name);
+      _pendingUserProperties[name] = ''; // empty string signals removal in next send
     }
   }
 
@@ -434,12 +448,13 @@ class AmbilyticsSession {
       bodyMap['user_id'] = userId;
     }
 
-    // Add user properties if any are set
-    if (_userProperties.isNotEmpty) {
+    // Send only pending (changed) user properties, then clear
+    if (_pendingUserProperties.isNotEmpty) {
       bodyMap['user_properties'] = {
-        for (final entry in _userProperties.entries)
+        for (final entry in _pendingUserProperties.entries)
           entry.key: {'value': entry.value}
       };
+      _pendingUserProperties = {};
     }
 
     var body = jsonEncode(bodyMap);
