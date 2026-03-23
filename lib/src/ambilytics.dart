@@ -266,6 +266,27 @@ void _sendAppLaunchEvent() {
   sendEvent(name: PredefinedEvents.appLaunch, parameters: params);
 }
 
+/// Sends a `screen_view` event using either Firebase Analytics [logScreenView]
+/// or the GA4 Measurement Protocol.
+///
+/// [screenName] is required. [screenClass] is an optional widget/class name
+/// sent as `firebase_screen_class`.
+Future<void> sendScreenView({required String screenName, String? screenClass}) async {
+  if (!_initialized) return;
+  if (_disabled) return;
+
+  if (_firebaseAnalytics != null) {
+    await _firebaseAnalytics!.logScreenView(
+      screenName: screenName,
+      screenClass: screenClass,
+    );
+  } else if (_ambilytics != null) {
+    final params = <String, Object>{'screen_name': screenName};
+    if (screenClass != null) params['screen_class'] = screenClass;
+    await _ambilytics!.sendEvent('screen_view', params);
+  }
+}
+
 /// Sends a given [eventName] with given [params] using either [firebaseAnalytics]
 /// or Measurement Protocol [ambilytics]. It tries Firebase Analytics first (if it is initialized)
 /// then it goes to MP. It doesn't send events with both protocols, just one
@@ -292,34 +313,21 @@ bool defaultRouteFilter(Route<dynamic>? route) => route is PageRoute;
 bool anyRouteFilter(Route<dynamic>? route) => true;
 String? defaultNameExtractor(RouteSettings settings) => settings.name;
 
-/// Alternative to [FirebaseAnalyticsObserver] which intercepts
-/// Flutter navigation events and send screen view events.
-/// The difference is that for unsupported platforms (e.g. Linux, Window)
-/// of if FirebaseAnalytics is not configured
-/// the app uses Measurement Protocol and sends custom 'screen_view_cust'
-/// event together with screen name.
+/// Intercepts Flutter navigation events and sends `screen_view` events.
+///
+/// Uses [sendScreenView] internally, which calls [FirebaseAnalytics.logScreenView]
+/// on Firebase-backed platforms and sends a `screen_view` Measurement Protocol
+/// event on Windows/Linux.
 class AmbilyticsObserver extends RouteObserver<ModalRoute<dynamic>> {
   AmbilyticsObserver({
     this.nameExtractor = defaultNameExtractor,
     this.routeFilter = defaultRouteFilter,
-    this.alwaySendScreenViewCust = false,
-    Function(PlatformException error)? onError,
-  }) : assert(_initialized, 'Ambilytics must be initialized first') {
-    if (_firebaseAnalytics != null) {
-      faObserver = FirebaseAnalyticsObserver(
-        analytics: _firebaseAnalytics!,
-        nameExtractor: nameExtractor,
-        routeFilter: routeFilter,
-        onError: onError,
-      );
-    }
-  }
+    this.onError,
+  }) : assert(_initialized, 'Ambilytics must be initialized first');
 
-  FirebaseAnalyticsObserver? faObserver;
   final ScreenNameExtractor nameExtractor;
   final RouteFilter routeFilter;
-  final bool alwaySendScreenViewCust;
-  void Function(PlatformException error)? onError;
+  final void Function(PlatformException error)? onError;
 
   Future<void> _sendScreenView(Route<dynamic> route) async {
     final screenName = nameExtractor(route.settings);
@@ -327,12 +335,10 @@ class AmbilyticsObserver extends RouteObserver<ModalRoute<dynamic>> {
       debugPrint('Warning: Route has no name, skipping screen view event');
       return;
     }
-
-    if (_ambilytics != null) {
-      await _ambilytics!.sendEvent(PredefinedEvents.screenViewCust, {'screen_name': screenName});
-    } else {
-      await _firebaseAnalytics!
-          .logEvent(name: PredefinedEvents.screenViewCust, parameters: {'screen_name': screenName});
+    try {
+      await sendScreenView(screenName: screenName);
+    } on PlatformException catch (e) {
+      onError?.call(e);
     }
   }
 
@@ -342,10 +348,6 @@ class AmbilyticsObserver extends RouteObserver<ModalRoute<dynamic>> {
     if (_disabled) return;
 
     super.didPush(route, previousRoute);
-    if (faObserver != null) {
-      faObserver!.didPush(route, previousRoute);
-      if (!alwaySendScreenViewCust) return;
-    }
     if (routeFilter(route)) {
       _sendScreenView(route);
     }
@@ -357,10 +359,6 @@ class AmbilyticsObserver extends RouteObserver<ModalRoute<dynamic>> {
     if (_disabled) return;
 
     super.didReplace(newRoute: newRoute, oldRoute: oldRoute);
-    if (faObserver != null) {
-      faObserver!.didReplace(newRoute: newRoute, oldRoute: oldRoute);
-      if (!alwaySendScreenViewCust) return;
-    }
     if (newRoute != null && routeFilter(newRoute)) {
       _sendScreenView(newRoute);
     }
@@ -372,10 +370,6 @@ class AmbilyticsObserver extends RouteObserver<ModalRoute<dynamic>> {
     if (_disabled) return;
 
     super.didPop(route, previousRoute);
-    if (faObserver != null) {
-      faObserver!.didPop(route, previousRoute);
-      if (!alwaySendScreenViewCust) return;
-    }
     if (previousRoute != null && routeFilter(previousRoute) && routeFilter(route)) {
       _sendScreenView(previousRoute);
     }
@@ -485,6 +479,9 @@ class AmbilyticsSession {
 
 abstract class PredefinedEvents {
   static const appLaunch = "app_launch";
+  static const screenView = "screen_view";
+
+  @Deprecated('Use sendScreenView() which sends the standard screen_view event')
   static const screenViewCust = "screen_view_cust";
 }
 

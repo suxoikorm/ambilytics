@@ -389,6 +389,99 @@ void main() {
 
     debugDefaultTargetPlatformOverride = null;
   });
+
+  test('sendScreenView calls logScreenView on Firebase', () async {
+    var mock = MockFirebaseAnalytics();
+    when(() => mock.logEvent(
+        name: any(named: 'name'),
+        parameters: any(named: 'parameters'),
+        callOptions: any(named: 'callOptions'))).thenAnswer((_) async {});
+    when(() => mock.logScreenView(
+        screenName: any(named: 'screenName'),
+        screenClass: any(named: 'screenClass'),
+        callOptions: any(named: 'callOptions'))).thenAnswer((_) async {});
+    setMockFirebase(mock);
+    await initAnalytics(fallbackToMP: true);
+    expect(isAmbilyticsInitialized, true);
+    clearInteractions(mock);
+
+    await sendScreenView(screenName: 'HomeScreen');
+
+    verify(() => mock.logScreenView(
+        screenName: 'HomeScreen',
+        screenClass: null,
+        callOptions: any(named: 'callOptions'))).called(1);
+  });
+
+  test('sendScreenView passes screenClass to logScreenView on Firebase', () async {
+    var mock = MockFirebaseAnalytics();
+    when(() => mock.logEvent(
+        name: any(named: 'name'),
+        parameters: any(named: 'parameters'),
+        callOptions: any(named: 'callOptions'))).thenAnswer((_) async {});
+    when(() => mock.logScreenView(
+        screenName: any(named: 'screenName'),
+        screenClass: any(named: 'screenClass'),
+        callOptions: any(named: 'callOptions'))).thenAnswer((_) async {});
+    setMockFirebase(mock);
+    await initAnalytics(fallbackToMP: true);
+    clearInteractions(mock);
+
+    await sendScreenView(screenName: 'HomeScreen', screenClass: 'HomeWidget');
+
+    verify(() => mock.logScreenView(
+        screenName: 'HomeScreen',
+        screenClass: 'HomeWidget',
+        callOptions: any(named: 'callOptions'))).called(1);
+  });
+
+  test('sendScreenView sends screen_view event via Measurement Protocol', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    var mock = MockAmbilyticsSession();
+    when(() => mock.sendEvent(any(), any())).thenAnswer((_) async {});
+    setMockAmbilytics(mock);
+    await initAnalytics(fallbackToMP: true);
+    clearInteractions(mock);
+
+    await sendScreenView(screenName: 'SettingsScreen');
+
+    final captured = verify(() => mock.sendEvent(captureAny(), captureAny())).captured;
+    expect(captured[0], 'screen_view');
+    expect((captured[1] as Map)['screen_name'], 'SettingsScreen');
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  test('sendScreenView sends screen_class when screenClass is provided via MP', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    var mock = MockAmbilyticsSession();
+    when(() => mock.sendEvent(any(), any())).thenAnswer((_) async {});
+    setMockAmbilytics(mock);
+    await initAnalytics(fallbackToMP: true);
+    clearInteractions(mock);
+
+    await sendScreenView(screenName: 'SettingsScreen', screenClass: 'SettingsWidget');
+
+    final captured = verify(() => mock.sendEvent(captureAny(), captureAny())).captured;
+    expect(captured[0], 'screen_view');
+    expect((captured[1] as Map)['screen_name'], 'SettingsScreen');
+    expect((captured[1] as Map)['screen_class'], 'SettingsWidget');
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  test('sendScreenView does nothing when analytics is disabled', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    var mock = MockAmbilyticsSession();
+    when(() => mock.sendEvent(any(), any())).thenAnswer((_) async {});
+    setMockAmbilytics(mock);
+    await initAnalytics(fallbackToMP: true);
+    isAmbilyticsDisabled = true;
+    clearInteractions(mock);
+
+    await sendScreenView(screenName: 'HomeScreen');
+
+    verifyNever(() => mock.sendEvent(captureAny(), captureAny()));
+    debugDefaultTargetPlatformOverride = null;
+  });
 }
 
 class MockAmbilyticsObserver extends Mock implements AmbilyticsObserver {}
